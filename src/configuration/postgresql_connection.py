@@ -1,20 +1,18 @@
 import sys
 import psycopg2
-from dotenv import load_dotenv
 import os
 from src.logger import configure_logger
 from src.exception import MyException
 import logging
+from src.constants import POSTGRE_SQL_PASSWORD
 
-load_dotenv()
-
-def connect_to_postgresql():
+def postgresql_client():
     try:
         logging.info("Attempting to connect to PostgreSQL database...")
         conn = psycopg2.connect(
             dbname="mlops",
             user="postgres",
-            password=os.getenv("POSTGRE_SQL_PASSWORD"),
+            password=POSTGRE_SQL_PASSWORD,
             host="localhost"
         )
         logging.info("Successfully connected to PostgreSQL database.")
@@ -24,7 +22,7 @@ def connect_to_postgresql():
         raise MyException(e, sys)
 
 if __name__ == "__main__":
-    conn = connect_to_postgresql()
+    conn = postgresql_client()
     if conn:
         logging.info("Connection object created successfully.")
         conn.close()

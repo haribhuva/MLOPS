@@ -16,8 +16,6 @@ list_of_files = [
     f"{project_name}/configuration/__init__.py",
     f"{project_name}/configuration/postgresql_connection.py",
     f"{project_name}/configuration/aws_connection.py",
-     f"{project_name}/data_access/__init__.py",
-    f"{project_name}/data_access/data_access.py",
     f"{project_name}/constants/__init__.py",
     f"{project_name}/entity/__init__.py",
     f"{project_name}/entity/config_entity.py",
@@ -34,6 +32,7 @@ list_of_files = [
     "config/model.yaml",
     "config/schema.yaml",
     "app.py",
+    "demo.py",
     ]
 
 for filepath in list_of_files:

@@ -1,7 +1,25 @@
 pandas
 numpy
+dill
+certifi
+PyYAML
 boto3
+mypy-boto3-s3
+botocore
+fastapi
+python-multipart
+uvicorn
+jinja2
+imblearn
 psycopg2-binary
 psycopg2
 dotenv
 from_root
+ipykernel
+matplotlib
+plotly
+seaborn
+scikit-learn
+dvc
+mlflow
+-e .

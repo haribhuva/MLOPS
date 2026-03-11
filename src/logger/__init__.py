@@ -6,7 +6,7 @@ from datetime import datetime
 
 # Constants for log configuration
 LOG_DIR = 'logs'
-LOG_FILE = f"{datetime.now().strftime('%m_%d_%Y_%H_%M_%S')}.log"
+LOG_FILE = f"{datetime.now().strftime('%d_%m_%Y_%H_%M_%S')}.log"
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB
 BACKUP_COUNT = 3  # Number of backup log files to keep
 
@@ -22,6 +22,10 @@ def configure_logger():
     # Create a custom logger
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
+    
+    # Avoid adding duplicate handlers
+    if logger.handlers:
+        return logger
     
     # Define formatter
     formatter = logging.Formatter("[ %(asctime)s ] %(name)s - %(levelname)s - %(message)s")
@@ -39,6 +43,8 @@ def configure_logger():
     # Add handlers to the logger
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+    
+    return logger
 
 # Configure the logger
 configure_logger()
