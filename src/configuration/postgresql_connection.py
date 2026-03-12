@@ -4,16 +4,16 @@ import os
 from src.logger import configure_logger
 from src.exception import MyException
 import logging
-from src.constants import POSTGRE_SQL_PASSWORD
+from src.constants import POSTGRE_SQL_PASSWORD, DATABASE_NAME, USER, HOST
 
 def postgresql_client():
     try:
         logging.info("Attempting to connect to PostgreSQL database...")
         conn = psycopg2.connect(
-            dbname="mlops",
-            user="postgres",
-            password=POSTGRE_SQL_PASSWORD,
-            host="localhost"
+            dbname = DATABASE_NAME,
+            user = USER,
+            password = POSTGRE_SQL_PASSWORD,
+            host = HOST
         )
         logging.info("Successfully connected to PostgreSQL database.")
         return conn

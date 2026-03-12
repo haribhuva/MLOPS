@@ -21,3 +21,8 @@ class DataIngestionConfig:
     testing_file_path: str = os.path.join(data_ingestion_dir, DATA_INGESTION_INGESTED_DIR, TEST_FILE_NAME)
     train_collection_name:str = DATA_INGESTION_TRAIN_COLLECTION_NAME
     test_collection_name:str = DATA_INGESTION_TEST_COLLECTION_NAME
+
+@dataclass
+class DataValidationconfig:
+    data_validation_dir = os.path.join(training_pipeline_config.artifact_dir, DATA_VALIDATION_DIR_NAME)
+    validation_report_file_path = os.path.join(training_pipeline_config.artifact_dir, DATA_VALIDATION_REPORT_FILE_NAME)

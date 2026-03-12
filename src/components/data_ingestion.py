@@ -1,5 +1,6 @@
 from src.configuration.postgresql_connection import postgresql_client
 from src.entity.config_entity import DataIngestionConfig
+from src.entity.artifact_entity import DataIngestionArtifact
 from src.exception import MyException
 from src.logger import configure_logger
 
@@ -45,7 +46,12 @@ class DataAccess:
             self.logger.info(f"Train data saved at: {self.data_ingestion_config.training_file_path}")
             self.logger.info(f"Test data saved at: {self.data_ingestion_config.testing_file_path}")
 
-            return train_df, test_df
+            # Return a proper artifact with the file paths
+            data_ingestion_artifact = DataIngestionArtifact(
+                trained_data_path=self.data_ingestion_config.training_file_path,
+                test_data_path=self.data_ingestion_config.testing_file_path,
+            )
+            return data_ingestion_artifact
 
         except Exception as e:
             self.logger.error("Failed to fetch data from PostgreSQL DB.")
