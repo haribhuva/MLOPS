@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from datetime import date
 
 load_dotenv()
 
@@ -10,6 +11,10 @@ POSTGRE_SQL_PASSWORD = os.getenv("POSTGRE_SQL_PASSWORD")
 
 PIPELINE_NAME: str = ""
 ARTIFACT_DIR: str = "artifact"
+
+TARGET_COLUMN = "cycle"
+CURRENT_YEAR = date.today().year
+PREPROCESSING_OBJECT_FILE_NAME = "preprocessing.pkl"
 
 FILE_NAME: str = "data.csv"
 TRAIN_FILE_NAME: str = "train.csv"
@@ -31,3 +36,24 @@ Data Validation realted contant start with DATA_VALIDATION VAR NAME
 """
 DATA_VALIDATION_DIR_NAME: str = "data_validation"
 DATA_VALIDATION_REPORT_FILE_NAME: str = "report.yaml"
+
+"""
+Data Transformation ralated constant start with DATA_TRANSFORMATION VAR NAME
+"""
+DATA_TRANSFORMATION_DIR_NAME: str = "data_transformation"
+DATA_TRANSFORMATION_TRANSFORMED_DATA_DIR: str = "transformed"
+DATA_TRANSFORMATION_TRANSFORMED_OBJECT_DIR: str = "transformed_object"
+
+"""
+MODEL TRAINER related constant start with MODEL_TRAINER var name
+"""
+MODEL_TRAINER_DIR_NAME: str = "model_trainer"
+MODEL_TRAINER_TRAINED_MODEL_DIR: str = "trained_model"
+MODEL_TRAINER_TRAINED_MODEL_NAME: str = "model.keras"
+MODEL_TRAINER_MODEL_CONFIG_FILE_PATH: str = os.path.join("config", "model.yaml")
+
+"""
+MODEL EVALUATION related constant start with MODEL_EVALUATION var name
+"""
+MODEL_EVALUATION_DIR_NAME: str = "model_evaluation"
+MODEL_EVALUATION_REPORT_FILE_NAME: str = "evaluation_report.yaml"

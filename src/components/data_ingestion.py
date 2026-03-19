@@ -60,7 +60,7 @@ class DataAccess:
 if __name__ == "__main__":
     data_ingestion_config = DataIngestionConfig()
     data_access = DataAccess(data_ingestion_config)
-    train_df, test_df = data_access.export_data_collection_as_dataframe()
+    data_ingestion_artifact = data_access.export_data_collection_as_dataframe()
     data_access.logger.info("Data fetched and saved successfully.")
-    print(train_df.head())
-    print(test_df.head())
+    print(data_ingestion_artifact.trained_data_path)
+    print(data_ingestion_artifact.test_data_path)

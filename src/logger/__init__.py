@@ -43,6 +43,11 @@ def configure_logger():
     # Add handlers to the logger
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+
+    # Silence noisy third-party loggers
+    for lib in ["tensorflow", "h5py", "pydot", "matplotlib", "PIL",
+                "absl", "urllib3", "google", "mlflow", "werkzeug", "git"]:
+        logging.getLogger(lib).setLevel(logging.WARNING)
     
     return logger
 

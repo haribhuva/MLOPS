@@ -1,0 +1,20 @@
+window_size: 50
+epochs: 100
+batch_size: 32
+learning_rate: 0.0005
+cnn_filters: 128
+kernel_sizes: [3, 5, 7, 15]
+lstm_units: 256
+dropout_rate: 0.2
+dense_units: 128
+patience: 15
+rul_clip: 125
+run_tuning: false
+
+tuning:
+  learning_rate: [0.001, 0.0005, 0.0001]
+  lstm_units: [128, 256]
+  cnn_filters: [64, 128]
+  dropout_rate: [0.15, 0.25]
+  batch_size: [32, 64]
+  dense_units: [64, 128]

@@ -22,4 +22,6 @@ seaborn
 scikit-learn
 dvc
 mlflow
+tensorflow
+keras
 -e .

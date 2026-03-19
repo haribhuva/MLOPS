@@ -27,10 +27,12 @@ columns:
   - sensor_20: float
   - sensor_21: float
 
-numerical_columns:
+int_columns:
   - id
   - unit_id
   - cycle
+
+float_columns:
   - op_setting_1
   - op_setting_2
   - op_setting_3
@@ -56,19 +58,33 @@ numerical_columns:
   - sensor_20
   - sensor_21
 
-categorical_columns:
+numerical_columns: float_columns + int_columns
+
+rename_columns:
+  sensor_1:  T2_temp
+  sensor_2:  T24_temp
+  sensor_3:  T30_temp
+  sensor_4:  T50_temp
+  sensor_5:  P2_pressure
+  sensor_6:  P15_pressure
+  sensor_7:  P30_pressure
+  sensor_8:  Nf_rotation
+  sensor_9:  Nc_rotation
+  sensor_10: epr_ratio
+  sensor_11: Ps30_power
+  sensor_12: phi_pos
+  sensor_13: NRf_rotation
+  sensor_14: NRc_rotation
+  sensor_15: BPR
+  sensor_16: farB
+  sensor_17: htBleed
+  sensor_18: Nf_dmd
+  sensor_19: PCNfR_dmd
+  sensor_20: W31
+  sensor_21: W32
 
 drop_columns:
+  - id
+
+pass_through_columns:
   - unit_id
-  - op_setting_1
-  - op_setting_2
-  - op_setting_3
-  - sensor_1
-  - sensor_5
-  - sensor_6
-  - sensor_8
-  - sensor_10
-  - sensor_13
-  - sensor_16
-  - sensor_18
-  - sensor_19
