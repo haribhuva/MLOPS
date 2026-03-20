@@ -1,66 +1,72 @@
-from src.configuration.postgresql_connection import postgresql_client
-from src.entity.config_entity import DataIngestionConfig
-from src.entity.artifact_entity import DataIngestionArtifact
-from src.exception import MyException
-from src.logger import configure_logger
-
+"""Fetches raw train/test data from PostgreSQL and saves ingestion artifacts."""
 import os
 import sys
+
 import pandas as pd
 
+from src.configuration.postgresql_connection import postgresql_client
+from src.entity.artifact_entity import DataIngestionArtifact
+from src.entity.config_entity import DataIngestionConfig
+from src.exception import MyException
+from src.logger import logging
 
-class DataAccess:
-    def __init__(self, data_ingestion_config: DataIngestionConfig):
-        self.data_ingestion_config = data_ingestion_config
-        self.logger = configure_logger()
-        self.logger.info("DataAccess class initialized with DataIngestionConfig.")
 
-    def export_data_collection_as_dataframe(self) -> tuple:
+class DataIngestion:
+    """Fetches raw data from the database and persists it as CSV artifacts."""
+
+    def __init__(self, data_ingestion_config: DataIngestionConfig) -> None:
         try:
-            self.logger.info("Attempting to fetch data from PostgreSQL DB..")
-
-            query_train = f"SELECT * FROM {self.data_ingestion_config.train_collection_name};"
-            query_test = f"SELECT * FROM {self.data_ingestion_config.test_collection_name};"
-
-            conn = postgresql_client()
-            train_df = pd.read_sql_query(query_train, conn)
-            test_df = pd.read_sql_query(query_test, conn)
-            conn.close()
-
-            self.logger.info("Data fetched successfully from PostgreSQL DB.")
-
-            # Create artifact directories and save data
-            feature_store_dir = os.path.dirname(self.data_ingestion_config.feature_store_file_path)
-            ingested_dir = os.path.dirname(self.data_ingestion_config.training_file_path)
-            os.makedirs(feature_store_dir, exist_ok=True)
-            os.makedirs(ingested_dir, exist_ok=True)
-
-            # Save combined data to feature store
-            combined_df = pd.concat([train_df, test_df], ignore_index=True)
-            combined_df.to_csv(self.data_ingestion_config.feature_store_file_path, index=False)
-            self.logger.info(f"Feature store saved at: {self.data_ingestion_config.feature_store_file_path}")
-
-            # Save train and test data to ingested directory
-            train_df.to_csv(self.data_ingestion_config.training_file_path, index=False)
-            test_df.to_csv(self.data_ingestion_config.testing_file_path, index=False)
-            self.logger.info(f"Train data saved at: {self.data_ingestion_config.training_file_path}")
-            self.logger.info(f"Test data saved at: {self.data_ingestion_config.testing_file_path}")
-
-            # Return a proper artifact with the file paths
-            data_ingestion_artifact = DataIngestionArtifact(
-                trained_data_path=self.data_ingestion_config.training_file_path,
-                test_data_path=self.data_ingestion_config.testing_file_path,
-            )
-            return data_ingestion_artifact
-
+            self._config = data_ingestion_config
+            logging.info("DataIngestion initialized.")
         except Exception as e:
-            self.logger.error("Failed to fetch data from PostgreSQL DB.")
-            raise MyException(e, sys)
-        
-if __name__ == "__main__":
-    data_ingestion_config = DataIngestionConfig()
-    data_access = DataAccess(data_ingestion_config)
-    data_ingestion_artifact = data_access.export_data_collection_as_dataframe()
-    data_access.logger.info("Data fetched and saved successfully.")
-    print(data_ingestion_artifact.trained_data_path)
-    print(data_ingestion_artifact.test_data_path)
+            raise MyException(e, sys) from e
+
+    def _fetch_dataframes(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Query PostgreSQL for train and test tables."""
+        logging.info("Fetching data from PostgreSQL.")
+        conn = postgresql_client()
+        try:
+            train_df = pd.read_sql_query(
+                f"SELECT * FROM {self._config.train_collection_name};", conn
+            )
+            test_df = pd.read_sql_query(
+                f"SELECT * FROM {self._config.test_collection_name};", conn
+            )
+        finally:
+            conn.close()
+        logging.info("Data fetched successfully from PostgreSQL.")
+        return train_df, test_df
+
+    def _save_artifacts(
+        self, train_df: pd.DataFrame, test_df: pd.DataFrame
+    ) -> None:
+        """Persist raw data to the feature store and ingested directories."""
+        logging.info("Saving ingestion artifacts.")
+        os.makedirs(os.path.dirname(self._config.feature_store_file_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self._config.training_file_path), exist_ok=True)
+
+        combined_df = pd.concat([train_df, test_df], ignore_index=True)
+        combined_df.to_csv(self._config.feature_store_file_path, index=False)
+        logging.info(f"Feature store saved: {self._config.feature_store_file_path}")
+
+        train_df.to_csv(self._config.training_file_path, index=False)
+        test_df.to_csv(self._config.testing_file_path, index=False)
+        logging.info(f"Train saved: {self._config.training_file_path}")
+        logging.info(f"Test saved: {self._config.testing_file_path}")
+
+    def initiate_data_ingestion(self) -> DataIngestionArtifact:
+        """Public entry point — fetch, save, and return the artifact."""
+        try:
+            logging.info("DataIngestion started.")
+            train_df, test_df = self._fetch_dataframes()
+            self._save_artifacts(train_df, test_df)
+
+            artifact = DataIngestionArtifact(
+                trained_data_path=self._config.training_file_path,
+                test_data_path=self._config.testing_file_path,
+            )
+            logging.info("DataIngestion completed.")
+            return artifact
+        except Exception as e:
+            logging.error("DataIngestion failed.")
+            raise MyException(e, sys) from e

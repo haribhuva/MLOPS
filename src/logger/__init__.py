@@ -1,55 +1,53 @@
+"""Rotating-file + console logging configured at import time."""
 import logging
 import os
 from logging.handlers import RotatingFileHandler
 from from_root import from_root
 from datetime import datetime
 
-# Constants for log configuration
-LOG_DIR = 'logs'
-LOG_FILE = f"{datetime.now().strftime('%d_%m_%Y_%H_%M_%S')}.log"
-MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB
-BACKUP_COUNT = 3  # Number of backup log files to keep
+_LOG_DIR = "logs"
+_LOG_FILE = f"{datetime.now().strftime('%d_%m_%Y_%H_%M_%S')}.log"
+_MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB
+_BACKUP_COUNT = 3
 
-# Construct log file path
-log_dir_path = os.path.join(from_root(), LOG_DIR)
-os.makedirs(log_dir_path, exist_ok=True)
-log_file_path = os.path.join(log_dir_path, LOG_FILE)
+_log_dir_path = os.path.join(from_root(), _LOG_DIR)
+os.makedirs(_log_dir_path, exist_ok=True)
+_log_file_path = os.path.join(_log_dir_path, _LOG_FILE)
 
-def configure_logger():
-    """
-    Configures logging with a rotating file handler and a console handler.
-    """
-    # Create a custom logger
+
+def configure_logger() -> logging.Logger:
+    """Set up root logger with rotating file and console handlers."""
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
-    
-    # Avoid adding duplicate handlers
+
     if logger.handlers:
         return logger
-    
-    # Define formatter
-    formatter = logging.Formatter("[ %(asctime)s ] %(name)s - %(levelname)s - %(message)s")
 
-    # File handler with rotation
-    file_handler = RotatingFileHandler(log_file_path, maxBytes=MAX_LOG_SIZE, backupCount=BACKUP_COUNT)
+    formatter = logging.Formatter(
+        "[ %(asctime)s ] %(name)s - %(levelname)s - %(message)s"
+    )
+
+    file_handler = RotatingFileHandler(
+        _log_file_path, maxBytes=_MAX_LOG_SIZE, backupCount=_BACKUP_COUNT
+    )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.DEBUG)
-    
-    # Console handler
+
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
-    
-    # Add handlers to the logger
+
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
     # Silence noisy third-party loggers
-    for lib in ["tensorflow", "h5py", "pydot", "matplotlib", "PIL",
-                "absl", "urllib3", "google", "mlflow", "werkzeug", "git"]:
+    for lib in [
+        "tensorflow", "h5py", "pydot", "matplotlib", "PIL",
+        "absl", "urllib3", "google", "mlflow", "werkzeug", "git",
+    ]:
         logging.getLogger(lib).setLevel(logging.WARNING)
-    
+
     return logger
 
-# Configure the logger
+
 configure_logger()

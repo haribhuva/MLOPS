@@ -1,20 +1,39 @@
-window_size: 50
-epochs: 100
-batch_size: 32
-learning_rate: 0.0005
-cnn_filters: 128
-kernel_sizes: [3, 5, 7, 15]
-lstm_units: 256
-dropout_rate: 0.2
-dense_units: 128
-patience: 15
-rul_clip: 125
-run_tuning: false
+target_column: life_ratio
+random_state: 42
+selected_model: auto
+internal_val_size: 0.2
+evaluation_plot_points: 300
+max_svr_train_samples: 12000
 
-tuning:
-  learning_rate: [0.001, 0.0005, 0.0001]
-  lstm_units: [128, 256]
-  cnn_filters: [64, 128]
-  dropout_rate: [0.15, 0.25]
-  batch_size: [32, 64]
-  dense_units: [64, 128]
+models:
+  linear_regression: {}
+
+  svr:
+    kernel: rbf
+    C: 20.0
+    epsilon: 0.01
+
+  decision_tree:
+    max_depth: 20
+
+  random_forest:
+    n_estimators: 220
+    max_depth: 18
+    min_samples_split: 2
+    min_samples_leaf: 1
+
+  extra_trees:
+    n_estimators: 260
+    max_depth: 20
+    min_samples_split: 2
+    min_samples_leaf: 1
+
+  gradient_boosting:
+    n_estimators: 250
+    learning_rate: 0.06
+    max_depth: 4
+
+  hist_gradient_boosting:
+    learning_rate: 0.06
+    max_depth: 12
+    max_iter: 350

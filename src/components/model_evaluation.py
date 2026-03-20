@@ -1,191 +1,338 @@
+"""Evaluates all models and creates plot/metrics artifacts by evaluation mode."""
 import os
 import sys
 
+import matplotlib.pyplot as plt
 import numpy as np
-import tensorflow as tf
+import pandas as pd
+from sklearn import metrics
+from sklearn.model_selection import train_test_split
 
-
+from src.entity.artifact_entity import (
+    DataTransformationArtifact,
+    ModelEvaluationArtifact,
+    ModelTrainerArtifact,
+)
+from src.entity.config_entity import ModelEvaluationConfig
+from src.entity.estimator import ModelEstimator
 from src.exception import MyException
 from src.logger import logging
-from src.utils.main_utils import read_yaml_file, load_numpy_array_data, write_yaml_file
-from src.entity.config_entity import ModelEvaluationConfig
-from src.entity.artifact_entity import (DataTransformationArtifact,
-                                         ModelTrainerArtifact,
-                                         ModelEvaluationArtifact)
-from src.components.model_trainer import ModelTrainer
-
-
-# Suppress TensorFlow verbose logging
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-tf.get_logger().setLevel("ERROR")
+from src.utils.main_utils import (
+    load_object,
+    read_csv,
+    read_yaml_file,
+    resolve_target_column,
+    save_object,
+    split_features_target,
+    write_yaml_file,
+)
 
 
 class ModelEvaluation:
+    """Produces comparison artifacts and persists the selected best model."""
 
-    def __init__(self, model_evaluation_config: ModelEvaluationConfig,
-                 data_transformation_artifact: DataTransformationArtifact,
-                 model_trainer_artifact: ModelTrainerArtifact):
+    _CFG_TARGET = "target_column"
+    _CFG_RAND_STATE = "random_state"
+    _CFG_VAL_SIZE = "internal_val_size"
+    _CFG_MAX_SVR_SAMPLES = "max_svr_train_samples"
+    _CFG_PLOT_POINTS = "evaluation_plot_points"
+    _CFG_MODELS = "models"
+    _CFG_EVAL_MODE = "evaluation_mode"
+    _CFG_SELECTION_MODE = "model_selection_mode"
+    _CFG_SPLIT_TEST_SIZE = "random_split_test_size"
+
+    def __init__(
+        self,
+        model_evaluation_config: ModelEvaluationConfig,
+        data_transformation_artifact: DataTransformationArtifact,
+        model_trainer_artifact: ModelTrainerArtifact,
+    ) -> None:
         try:
-            self.model_evaluation_config = model_evaluation_config
-            self.data_transformation_artifact = data_transformation_artifact
-            self.model_trainer_artifact = model_trainer_artifact
-            self._model_config = read_yaml_file(model_evaluation_config.model_config_file_path)
+            self._config = model_evaluation_config
+            self._data_artifact = data_transformation_artifact
+            self._trainer_artifact = model_trainer_artifact
+            self._model_config = read_yaml_file(model_evaluation_config.model_config_file_path) or {}
             logging.info("ModelEvaluation initialized.")
         except Exception as e:
             raise MyException(e, sys) from e
 
-    def load_model(self, model_path: str):
-        """Load model from disk. Handles .keras and .pkl formats."""
-        logging.info(f"Loading model from: {model_path}")
-        try:
-            if model_path.endswith(".keras") or model_path.endswith(".h5"):
-                return tf.keras.models.load_model(model_path)
-            elif model_path.endswith(".pkl"):
-                from src.utils.main_utils import load_object
-                return load_object(model_path)
-            else:
-                raise ValueError(f"Unsupported model format: {model_path}")
-        except Exception as e:
-            raise MyException(e, sys) from e
-
     @staticmethod
-    def _get_last_window_predictions(features: np.ndarray, target: np.ndarray,
-                                      model, window_size: int,
-                                      unit_col_idx: int) -> tuple:
-        """
-        For each engine, extract the LAST sliding window and predict.
-        Returns (y_pred_last, y_true_last) — one value per engine.
-        """
-        preds, actuals = [], []
-        for uid in np.unique(features[:, unit_col_idx]):
-            mask = features[:, unit_col_idx] == uid
-            engine_data = np.delete(features[mask], unit_col_idx, axis=1)
-            engine_target = target[mask]
-            if len(engine_data) >= window_size:
-                last_window = engine_data[-window_size:]
-                pred = model.predict(last_window[np.newaxis, ...], verbose=0)[0, 0]
-                preds.append(pred)
-                actuals.append(engine_target[-1])
-        return np.array(preds), np.array(actuals)
+    def _compute_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float]:
+        """Compute R2, MAE, and RMSE."""
+        mse = metrics.mean_squared_error(y_true, y_pred)
+        return {
+            "r2": float(metrics.r2_score(y_true, y_pred)),
+            "mae": float(metrics.mean_absolute_error(y_true, y_pred)),
+            "rmse": float(np.sqrt(mse)),
+        }
 
-    @staticmethod
-    def _nasa_cmapss_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        """
-        NASA CMAPSS asymmetric penalty scoring function.
-        Late predictions (d >= 0) are penalized more harshly than early ones.
+    def _save_plot(
+        self,
+        y_true: pd.Series,
+        y_pred: np.ndarray,
+        model_name: str,
+        target_col: str,
+        output_dir: str,
+        suffix: str = "",
+    ) -> str:
+        """Save predicted-vs-actual line chart and return saved file path."""
+        os.makedirs(output_dir, exist_ok=True)
 
-        d_i = predicted_i - actual_i
-        if d_i < 0:  s_i = exp(-d_i / 13) - 1    (early)
-        if d_i >= 0: s_i = exp( d_i / 10) - 1     (late)
-        S = sum(s_i)
-        """
-        d = y_pred - y_true
-        d = np.clip(d, -500, 500)  # Prevent exp overflow
-        score = np.where(d < 0, np.exp(-d / 13) - 1, np.exp(d / 10) - 1)
-        return float(np.sum(score))
+        y_true_arr = np.asarray(y_true)
+        y_pred_arr = np.asarray(y_pred)
+        order = np.argsort(y_true_arr)
 
-    def evaluate_model(self, model) -> dict:
-        """
-        Load test data, recreate sequences, compute all 5 metrics:
-          - eval_rmse_all_windows
-          - eval_rmse_last_window
-          - eval_mae
-          - eval_r2
-          - eval_rul_score (NASA CMAPSS asymmetric penalty)
-        """
-        logging.info("Starting model evaluation.")
-        try:
-            # Load test array
-            test_arr = load_numpy_array_data(
-                self.data_transformation_artifact.transformed_test_file_path
+        max_points = int(self._model_config.get(self._CFG_PLOT_POINTS, 300))
+        n = min(len(y_true_arr), max_points)
+
+        title_suffix = f" ({suffix})" if suffix else ""
+        fig, ax = plt.subplots(figsize=(10, 4.5))
+        ax.plot(range(n), y_true_arr[order][:n], label="Actual", linewidth=2.0)
+        ax.plot(range(n), y_pred_arr[order][:n], label="Predicted", linewidth=1.8)
+        ax.set_title(f"Predicted vs Actual - {model_name}{title_suffix}")
+        ax.set_xlabel("Sample Index (sorted by actual)")
+        ax.set_ylabel(target_col)
+        ax.legend()
+        fig.tight_layout()
+
+        plot_path = os.path.join(output_dir, f"predicted_vs_actual_{model_name}.png")
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+        logging.info(f"Plot saved: {plot_path}")
+        return plot_path
+
+    def _evaluate_models(
+        self,
+        x_train: pd.DataFrame,
+        y_train: pd.Series,
+        x_eval: pd.DataFrame,
+        y_eval: pd.Series,
+    ) -> tuple[dict[str, object], str, dict[str, dict[str, float]], dict[str, np.ndarray]]:
+        """Fit all models on training data and evaluate on evaluation data."""
+        logging.info("Evaluating model candidates.")
+
+        random_state = int(self._model_config.get(self._CFG_RAND_STATE, 42))
+        max_svr_samples = int(self._model_config.get(self._CFG_MAX_SVR_SAMPLES, 12000))
+
+        all_models = ModelEstimator.build_all(
+            model_params=self._model_config.get(self._CFG_MODELS, {}),
+            random_state=random_state,
+        )
+
+        fitted_models: dict[str, object] = {}
+        report: dict[str, dict[str, float]] = {}
+        predictions: dict[str, np.ndarray] = {}
+
+        for name, model in all_models.items():
+            x_fit, y_fit = x_train, y_train
+
+            # SVR can be expensive on very large training sets.
+            if name == "SVR" and len(x_train) > max_svr_samples:
+                logging.warning(
+                    f"SVR sample cap active: {max_svr_samples}/{len(x_train)} samples."
+                )
+                rng = np.random.RandomState(random_state)
+                idx = rng.choice(len(x_train), size=max_svr_samples, replace=False)
+                x_fit, y_fit = x_train.iloc[idx], y_train.iloc[idx]
+
+            model.fit(x_fit, y_fit)
+            fitted_models[name] = model
+
+            y_pred = model.predict(x_eval)
+            predictions[name] = y_pred
+
+            score = self._compute_metrics(y_eval, y_pred)
+            report[name] = score
+            logging.info(
+                f"{name} -> R2: {score['r2']:.4f} | "
+                f"MAE: {score['mae']:.4f} | RMSE: {score['rmse']:.4f}"
             )
-            x_test = test_arr[:, :-1]
-            y_test_raw = test_arr[:, -1]
 
-            unit_col_idx = x_test.shape[1] - 1
-            rul_clip = self._model_config["rul_clip"]
-            window_size = self._model_config["window_size"]
+        best_name = max(report, key=lambda k: report[k]["r2"])
+        return fitted_models, best_name, report, predictions
 
-            # Compute RUL (reusing ModelTrainer static method)
-            y_test = ModelTrainer.compute_rul(x_test, y_test_raw, unit_col_idx, rul_clip)
+    def _save_evaluation_outputs(
+        self,
+        evaluation_name: str,
+        y_true: pd.Series,
+        target_col: str,
+        model_report: dict[str, dict[str, float]],
+        model_predictions: dict[str, np.ndarray],
+        best_model_name: str,
+    ) -> dict[str, str]:
+        """Save plots, metrics CSV, and summary text for one evaluation pass."""
+        if evaluation_name == "random_split":
+            output_dir = self._config.random_split_evaluation_dir
+        elif evaluation_name == "external_holdout":
+            output_dir = self._config.external_holdout_evaluation_dir
+        else:
+            output_dir = os.path.join(self._config.model_evaluation_dir, evaluation_name)
 
-            # ALL-WINDOWS evaluation
-            X_test_seq, y_test_seq = ModelTrainer.create_sequences(
-                x_test, y_test, window_size, unit_col_idx
+        os.makedirs(output_dir, exist_ok=True)
+
+        rows: list[dict] = []
+        for name, scores in model_report.items():
+            rows.append({"model_name": name, **scores})
+            self._save_plot(
+                y_true=y_true,
+                y_pred=model_predictions[name],
+                model_name=name,
+                target_col=target_col,
+                output_dir=output_dir,
+                suffix=evaluation_name,
             )
-            y_pred_all = model.predict(X_test_seq, verbose=0).flatten()
 
-            eval_rmse_all = float(np.sqrt(np.mean((y_test_seq - y_pred_all) ** 2)))
-            eval_mae = float(np.mean(np.abs(y_test_seq - y_pred_all)))
+        metrics_df = pd.DataFrame(rows).sort_values("r2", ascending=False)
+        metrics_csv_path = os.path.join(output_dir, self._config.metrics_file_name)
+        summary_txt_path = os.path.join(output_dir, self._config.summary_file_name)
 
-            # LAST-WINDOW evaluation (one prediction per engine)
-            y_pred_last, y_true_last = self._get_last_window_predictions(
-                x_test, y_test, model, window_size, unit_col_idx
-            )
+        metrics_df.to_csv(metrics_csv_path, index=False)
+        logging.info(f"Metrics CSV saved: {metrics_csv_path}")
 
-            eval_rmse_last = float(np.sqrt(np.mean((y_true_last - y_pred_last) ** 2)))
+        with open(summary_txt_path, "w", encoding="utf-8") as f:
+            f.write(f"Evaluation: {evaluation_name}\n")
+            f.write(f"Best Model: {best_model_name}\n\n")
+            f.write("Model Comparison (sorted by R2):\n")
+            f.write(metrics_df.to_string(index=False, float_format=lambda x: f"{x:.6f}"))
+            f.write("\n")
+        logging.info(f"Summary saved: {summary_txt_path}")
 
-            # R² score (manual to avoid sklearn dependency)
-            ss_res = np.sum((y_true_last - y_pred_last) ** 2)
-            ss_tot = np.sum((y_true_last - np.mean(y_true_last)) ** 2)
-            eval_r2 = float(1 - (ss_res / ss_tot)) if ss_tot != 0 else 0.0
-
-            # NASA CMAPSS asymmetric score
-            eval_rul_score = self._nasa_cmapss_score(y_true_last, y_pred_last)
-
-            metrics = {
-                "eval_rmse_all_windows": eval_rmse_all,
-                "eval_rmse_last_window": eval_rmse_last,
-                "eval_mae": eval_mae,
-                "eval_r2": eval_r2,
-                "eval_rul_score": eval_rul_score
-            }
-
-            logging.info(f"Evaluation metrics — "
-                         f"RMSE_all: {eval_rmse_all:.4f}, "
-                         f"RMSE_last: {eval_rmse_last:.4f}, "
-                         f"MAE: {eval_mae:.4f}, "
-                         f"R2: {eval_r2:.4f}, "
-                         f"CMAPSS_Score: {eval_rul_score:.2f}")
-
-            return metrics
-
-        except Exception as e:
-            raise MyException(e, sys) from e
+        return {
+            "evaluation_dir": output_dir,
+            "metrics_csv_path": metrics_csv_path,
+            "summary_txt_path": summary_txt_path,
+        }
 
     def initiate_model_evaluation(self) -> ModelEvaluationArtifact:
-        logging.info("Initiating model evaluation.")
+        """Run configured evaluations, write report, and persist selected model."""
         try:
-            # Load trained model
-            model = self.load_model(self.model_trainer_artifact.trained_model_file_path)
+            logging.info("ModelEvaluation started.")
 
-            # Compute all metrics
-            metrics = self.evaluate_model(model)
+            configured_target = str(self._model_config.get(self._CFG_TARGET, "life_ratio"))
+            train_df = read_csv(self._data_artifact.transformed_train_file_path)
+            test_df = read_csv(self._data_artifact.transformed_test_file_path)
 
+            target_col = resolve_target_column(train_df, configured_target)
+            _ = resolve_target_column(test_df, configured_target)
 
+            eval_mode = str(self._model_config.get(self._CFG_EVAL_MODE, "random_split")).strip().lower()
+            selection_mode = str(self._model_config.get(self._CFG_SELECTION_MODE, "random_split")).strip().lower()
+            split_test_size = float(
+                self._model_config.get(
+                    self._CFG_SPLIT_TEST_SIZE,
+                    self._model_config.get(self._CFG_VAL_SIZE, 0.2),
+                )
+            )
+            random_state = int(self._model_config.get(self._CFG_RAND_STATE, 42))
 
-            # Save evaluation report as YAML
-            os.makedirs(os.path.dirname(
-                self.model_evaluation_config.evaluation_report_file_path), exist_ok=True)
+            random_split_report: dict[str, dict[str, float]] | None = None
+            external_holdout_report: dict[str, dict[str, float]] | None = None
+            random_split_outputs: dict[str, str] | None = None
+            external_holdout_outputs: dict[str, str] | None = None
+
+            random_split_models: dict[str, object] = {}
+            external_holdout_models: dict[str, object] = {}
+            random_split_best_name: str | None = None
+            external_holdout_best_name: str | None = None
+
+            if eval_mode in {"random_split", "both"}:
+                x_all, y_all = split_features_target(train_df, target_col)
+                x_train, x_val, y_train, y_val = train_test_split(
+                    x_all,
+                    y_all,
+                    test_size=split_test_size,
+                    random_state=random_state,
+                )
+                random_split_models, random_split_best_name, random_split_report, random_split_predictions = self._evaluate_models(
+                    x_train,
+                    y_train,
+                    x_val,
+                    y_val,
+                )
+                random_split_outputs = self._save_evaluation_outputs(
+                    evaluation_name="random_split",
+                    y_true=y_val,
+                    target_col=target_col,
+                    model_report=random_split_report,
+                    model_predictions=random_split_predictions,
+                    best_model_name=random_split_best_name,
+                )
+
+            if eval_mode in {"external_holdout", "both"}:
+                x_train_ext, y_train_ext = split_features_target(train_df, target_col)
+                x_test_ext, y_test_ext = split_features_target(test_df, target_col)
+                external_holdout_models, external_holdout_best_name, external_holdout_report, external_holdout_predictions = self._evaluate_models(
+                    x_train_ext,
+                    y_train_ext,
+                    x_test_ext,
+                    y_test_ext,
+                )
+                external_holdout_outputs = self._save_evaluation_outputs(
+                    evaluation_name="external_holdout",
+                    y_true=y_test_ext,
+                    target_col=target_col,
+                    model_report=external_holdout_report,
+                    model_predictions=external_holdout_predictions,
+                    best_model_name=external_holdout_best_name,
+                )
+
+            if selection_mode == "external_holdout":
+                selected_name = external_holdout_best_name
+                selected_models = external_holdout_models
+                selected_report = external_holdout_report
+            else:
+                selected_name = random_split_best_name
+                selected_models = random_split_models
+                selected_report = random_split_report
+
+            if selected_name is None or selected_report is None or selected_name not in selected_models:
+                raise ValueError("Could not determine best model from evaluation mode/settings.")
+
+            # Refit selected best model on full transformed train data and persist it.
+            x_full_train, y_full_train = split_features_target(train_df, target_col)
+            best_model = selected_models[selected_name]
+            best_model.fit(x_full_train, y_full_train)
+            save_object(self._trainer_artifact.trained_model_file_path, best_model)
+
+            # Log holdout metrics for the final persisted model.
+            x_test, y_test = split_features_target(test_df, target_col)
+            persisted_model = load_object(self._trainer_artifact.trained_model_file_path)
+            y_pred = persisted_model.predict(x_test)
+            holdout_score = self._compute_metrics(y_test, y_pred)
+            logging.info(
+                f"Holdout - R2: {holdout_score['r2']:.4f} | "
+                f"MAE: {holdout_score['mae']:.4f} | RMSE: {holdout_score['rmse']:.4f}"
+            )
+
+            full_report = {
+                "best_model_name": selected_name,
+                "best_model_r2": float(selected_report[selected_name]["r2"]),
+                "evaluation_mode": eval_mode,
+                "external_holdout_outputs": external_holdout_outputs,
+                "external_holdout_report": external_holdout_report,
+                "model_selection_mode": selection_mode,
+                "random_split_outputs": random_split_outputs,
+                "random_split_report": random_split_report,
+                "target_column": target_col,
+            }
             write_yaml_file(
-                file_path=self.model_evaluation_config.evaluation_report_file_path,
-                content=metrics,
-                replace=True
+                file_path=self._config.evaluation_report_file_path,
+                content=full_report,
+                replace=True,
             )
-            logging.info(f"Evaluation report saved at: "
-                         f"{self.model_evaluation_config.evaluation_report_file_path}")
+            logging.info(f"Full report saved: {self._config.evaluation_report_file_path}")
 
-            # Build artifact — no previous model to compare, accept all for now
-            model_evaluation_artifact = ModelEvaluationArtifact(
+            artifact = ModelEvaluationArtifact(
                 is_model_accepted=True,
-                changed_accuracy=0.0,
-                trained_model_path=self.model_trainer_artifact.trained_model_file_path,
-                best_model_path=self.model_trainer_artifact.trained_model_file_path
+                changed_accuracy=float(selected_report[selected_name]["r2"]),
+                trained_model_path=self._trainer_artifact.trained_model_file_path,
+                best_model_path=self._trainer_artifact.trained_model_file_path,
+                evaluation_report_file_path=self._config.evaluation_report_file_path,
+                metric_artifact=full_report,
             )
-
-            logging.info("Model Evaluation Completed !!!")
-            return model_evaluation_artifact
+            logging.info("ModelEvaluation completed.")
+            return artifact
 
         except Exception as e:
-            logging.info("Model evaluation failed.")
+            logging.error("ModelEvaluation failed.")
             raise MyException(e, sys) from e

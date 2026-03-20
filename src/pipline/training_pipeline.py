@@ -1,150 +1,131 @@
+"""Orchestrates the full training pipeline: ingest → validate → transform → train → evaluate."""
 import sys
+
+from src.components.data_ingestion import DataIngestion
+from src.components.data_transformation import DataTransformation
+from src.components.data_validation import DataValidation
+from src.components.model_evaluation import ModelEvaluation
+from src.components.model_trainer import ModelTrainer
+from src.entity.artifact_entity import (
+    DataIngestionArtifact,
+    DataTransformationArtifact,
+    DataValidationArtifact,
+    ModelEvaluationArtifact,
+    ModelTrainerArtifact,
+)
+from src.entity.config_entity import (
+    DataIngestionConfig,
+    DataTransformationConfig,
+    DataValidationConfig,
+    ModelEvaluationConfig,
+    ModelTrainerConfig,
+)
 from src.exception import MyException
 from src.logger import logging
 
-from src.components.data_ingestion import DataAccess
-from src.components.data_validation import DataValidation
-from src.components.data_transformation import DataTransformation
-# from src.components.model_trainer import ModelTrainer
-# from src.components.model_evaluation import ModelEvaluation
-# from src.components.model_pusher import ModelPusher
-
-from src.entity.config_entity import (DataIngestionConfig,
-                                          DataValidationconfig,
-                                          DataTransformationConfig)
-                                        #   ModelTrainerConfig,
-                                        #   ModelEvaluationConfig)
-                                        #   ModelPusherConfig)
-                                          
-from src.entity.artifact_entity import (DataIngestionArtifact, DataTransformationArtifact,
-                                            DataValidationArtifact,
-                                            DataTransformationArtifact)
-                                            # ModelTrainerArtifact,
-                                            # ModelEvaluationArtifact)
-                                            # ModelPusherArtifact)
-
-
 
 class TrainPipeline:
-    def __init__(self):
-        self.data_ingestion_config = DataIngestionConfig()
-        self.data_validation_config = DataValidationconfig()
-        self.data_transformation_config = DataTransformationConfig()
-        # self.model_trainer_config = ModelTrainerConfig()
-        # self.model_evaluation_config = ModelEvaluationConfig()
-        # self.model_pusher_config = ModelPusherConfig()
+    """Runs every pipeline stage in sequence, passing artifacts between stages."""
 
+    def __init__(self) -> None:
+        self._ingestion_config = DataIngestionConfig()
+        self._validation_config = DataValidationConfig()
+        self._transformation_config = DataTransformationConfig()
+        self._trainer_config = ModelTrainerConfig()
+        self._evaluation_config = ModelEvaluationConfig()
 
-    
-    def start_data_ingestion(self) -> DataIngestionArtifact:
-        """
-        This method of TrainPipeline class is responsible for starting data ingestion component
-        """
+    def _start_data_ingestion(self) -> DataIngestionArtifact:
+        """Fetch raw data from PostgreSQL and persist as CSV."""
         try:
-            logging.info("Entered the start_data_ingestion method of TrainPipeline class")
-            logging.info("Getting the data from postgreSQL DB")
-            data_ingestion = DataAccess(data_ingestion_config=self.data_ingestion_config)
-            data_ingestion_artifact = data_ingestion.export_data_collection_as_dataframe()
-            logging.info("Got the train_set and test_set from postgreSQL DB")
-            logging.info("Exited the start_data_ingestion method of TrainPipeline class")
-            return data_ingestion_artifact
+            logging.info("Pipeline stage: data ingestion.")
+            ingestion = DataIngestion(data_ingestion_config=self._ingestion_config)
+            return ingestion.initiate_data_ingestion()
         except Exception as e:
             raise MyException(e, sys) from e
-        
-    def start_data_validation(self, data_ingestion_artifact: DataIngestionArtifact) -> DataValidationArtifact:
-        """
-        This method of TrainPipeline class is responsible for starting data validation component
-        """
-        logging.info("Entered the start_data_validation method of TrainPipeline class")
 
+    def _start_data_validation(
+        self, data_ingestion_artifact: DataIngestionArtifact
+    ) -> DataValidationArtifact:
+        """Validate ingested data against schema."""
         try:
-            data_validation = DataValidation(data_ingestion_artifact=data_ingestion_artifact,
-                                             data_validation_config=self.data_validation_config
-                                             )
-
-            data_validation_artifact = data_validation.initiate_data_validation()
-
-            logging.info("Performed the data validation operation")
-            logging.info("Exited the start_data_validation method of TrainPipeline class")
-
-            return data_validation_artifact
+            logging.info("Pipeline stage: data validation.")
+            validation = DataValidation(
+                data_ingestion_artifact=data_ingestion_artifact,
+                data_validation_config=self._validation_config,
+            )
+            return validation.initiate_data_validation()
         except Exception as e:
             raise MyException(e, sys) from e
-        
-    def start_data_transformation(self, data_ingestion_artifact: DataIngestionArtifact, data_validation_artifact: DataValidationArtifact) -> DataTransformationArtifact:
-        """
-        This method of TrainPipeline class is responsible for starting data transformation component
-        """
+
+    def _start_data_transformation(
+        self,
+        data_ingestion_artifact: DataIngestionArtifact,
+        data_validation_artifact: DataValidationArtifact,
+    ) -> DataTransformationArtifact:
+        """Clean and feature-engineer the validated data."""
         try:
-            data_transformation = DataTransformation(data_ingestion_artifact=data_ingestion_artifact,
-                                                     data_transformation_config=self.data_transformation_config,
-                                                     data_validation_artifact=data_validation_artifact)
-            data_transformation_artifact = data_transformation.initiate_data_transformation()
-            return data_transformation_artifact
+            logging.info("Pipeline stage: data transformation.")
+            transformation = DataTransformation(
+                data_ingestion_artifact=data_ingestion_artifact,
+                data_transformation_config=self._transformation_config,
+                data_validation_artifact=data_validation_artifact,
+            )
+            return transformation.initiate_data_transformation()
         except Exception as e:
-            raise MyException(e, sys)
-        
-    # def start_model_trainer(self, data_transformation_artifact: DataTransformationArtifact) -> ModelTrainerArtifact:
-    #     """
-    #     This method of TrainPipeline class is responsible for starting model training
-    #     """
-    #     try:
-    #         model_trainer = ModelTrainer(data_transformation_artifact=data_transformation_artifact,
-    #                                      model_trainer_config=self.model_trainer_config
-    #                                      )
-    #         model_trainer_artifact = model_trainer.initiate_model_trainer()
-    #         return model_trainer_artifact
+            raise MyException(e, sys) from e
 
-    #     except Exception as e:
-    #         raise MyException(e, sys)
-
-    # def start_model_evaluation(self, data_transformation_artifact: DataTransformationArtifact,
-    #                            model_trainer_artifact: ModelTrainerArtifact) -> ModelEvaluationArtifact:
-    #     """
-    #     This method of TrainPipeline class is responsible for starting model evaluation
-    #     """
-    #     try:
-    #         model_evaluation = ModelEvaluation(
-    #             model_evaluation_config=self.model_evaluation_config,
-    #             data_transformation_artifact=data_transformation_artifact,
-    #             model_trainer_artifact=model_trainer_artifact
-    #         )
-    #         model_evaluation_artifact = model_evaluation.initiate_model_evaluation()
-    #         return model_evaluation_artifact
-    #     except Exception as e:
-    #         raise MyException(e, sys)
-
-    # def start_model_pusher(self, model_evaluation_artifact: ModelEvaluationArtifact) -> ModelPusherArtifact:
-    #     """
-    #     This method of TrainPipeline class is responsible for starting model pushing
-    #     """
-    #     try:
-    #         model_pusher = ModelPusher(model_evaluation_artifact=model_evaluation_artifact,
-    #                                    model_pusher_config=self.model_pusher_config
-    #                                    )
-    #         model_pusher_artifact = model_pusher.initiate_model_pusher()
-    #         return model_pusher_artifact
-    #     except Exception as e:
-    #         raise MyException(e, sys)
-
-    def run_pipeline(self, ) -> None:
-        """
-        This method of TrainPipeline class is responsible for running complete pipeline
-        """
+    def _start_model_trainer(
+        self, data_transformation_artifact: DataTransformationArtifact
+    ) -> ModelTrainerArtifact:
+        """Select and train the best model."""
         try:
-            data_ingestion_artifact = self.start_data_ingestion()
-            data_validation_artifact = self.start_data_validation(data_ingestion_artifact=data_ingestion_artifact)
-            data_transformation_artifact = self.start_data_transformation(
-                data_ingestion_artifact=data_ingestion_artifact, data_validation_artifact=data_validation_artifact)
-            # model_trainer_artifact = self.start_model_trainer(data_transformation_artifact=data_transformation_artifact)
-            # model_evaluation_artifact = self.start_model_evaluation(
-            #     data_transformation_artifact=data_transformation_artifact,
-            #     model_trainer_artifact=model_trainer_artifact
-            # )
-            # if not model_evaluation_artifact.is_model_accepted:
-            #     logging.info("Model not accepted.")
-            #     return None
-            # model_pusher_artifact = self.start_model_pusher(model_evaluation_artifact=model_evaluation_artifact)
-            
+            logging.info("Pipeline stage: model training.")
+            trainer = ModelTrainer(
+                data_transformation_artifact=data_transformation_artifact,
+                model_trainer_config=self._trainer_config,
+            )
+            return trainer.initiate_model_trainer()
         except Exception as e:
-            raise MyException(e, sys)
+            raise MyException(e, sys) from e
+
+    def _start_model_evaluation(
+        self,
+        data_transformation_artifact: DataTransformationArtifact,
+        model_trainer_artifact: ModelTrainerArtifact,
+    ) -> ModelEvaluationArtifact:
+        """Evaluate the trained model on the test set."""
+        try:
+            logging.info("Pipeline stage: model evaluation.")
+            evaluation = ModelEvaluation(
+                model_evaluation_config=self._evaluation_config,
+                data_transformation_artifact=data_transformation_artifact,
+                model_trainer_artifact=model_trainer_artifact,
+            )
+            return evaluation.initiate_model_evaluation()
+        except Exception as e:
+            raise MyException(e, sys) from e
+
+    def run_pipeline(self) -> None:
+        """Execute every stage in sequence."""
+        try:
+            logging.info("TrainPipeline started.")
+
+            ingestion_artifact = self._start_data_ingestion()
+            validation_artifact = self._start_data_validation(ingestion_artifact)
+            transformation_artifact = self._start_data_transformation(
+                ingestion_artifact, validation_artifact
+            )
+            trainer_artifact = self._start_model_trainer(transformation_artifact)
+            evaluation_artifact = self._start_model_evaluation(
+                transformation_artifact, trainer_artifact
+            )
+
+            if not evaluation_artifact.is_model_accepted:
+                logging.warning("Model not accepted — pipeline stopping.")
+                return
+
+            logging.info("TrainPipeline completed successfully.")
+
+        except Exception as e:
+            logging.error("TrainPipeline failed.")
+            raise MyException(e, sys) from e
